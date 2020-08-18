@@ -4,6 +4,7 @@ from os import listdir
 
 import numpy as np
 import pandas as pd
+import math
 
 """
   New version loads totalnum reports into a SQLite3 db from basedir (below) with the name format report_[siteid]_[foo].csv.
@@ -19,14 +20,98 @@ import pandas as pd
 """ Here's how I get the ontology data for the master list:
 select distinct concept_path, name_char from concept_dimension
 
-select distinct c_fullname, c_name, c_visualattributes, c_tooltip from act_covid
+select distinct c_fullname, c_name, c_visualattributes, c_tooltip from act_covid 
+ and c_visualattributes not like '%H%' and c_synonym_cd!='Y'
   (only the first two columns are needed)
 """
 
-basedir = "/Users/jeffklann/HMS/Projects/ACT/totalnum_data/reports"
-bigfullnamefile = '/Users/jeffklann/HMS/Projects/ACT/totalnum_data/ACT_covid_paths.csv'
-conn = sqlite3.connect(basedir + '/totalnums.db')
+# Thanks https://stackoverflow.com/questions/2298339/standard-deviation-for-sqlite
+class StdevFunc:
+    def __init__(self):
+        self.M = 0.0
+        self.S = 0.0
+        self.k = 1
 
+    def step(self, value):
+        if value is None:
+            return
+        tM = self.M
+        self.M += (value - tM) / self.k
+        self.S += (value - tM) * (value - self.M)
+        self.k += 1
+
+    def finalize(self):
+        if self.k < 3:
+            return None
+        return math.sqrt(self.S / (self.k-2))
+
+basedir = "/Users/jeffklann/HMS/Projects/ACT/totalnum_data/reports"
+bigfullnamefile = '/Users/jeffklann/HMS/Projects/ACT/totalnum_data/ACT_covid_paths_v3.csv'
+conn = sqlite3.connect(basedir + '/totalnums.db')
+conn.create_aggregate("stdev", 1, StdevFunc)
+
+""" SQL code that creates views and additional tables on the totalnum db for analytics
+"""
+def postProcess():
+   sql = r"""
+   -- Create a pre-joined view for faster coding
+    drop view if exists totalnums_recent_joined;
+
+    create view totalnums_recent_joined as
+    select c_hlevel,c_visualattributes,c_fullname,c_name,agg_date,agg_count,site from totalnums_recent t
+    inner join bigfullname f on f.fullname_int=t.fullname_int;
+
+   -- Create a view with old column names
+   drop view if exists totalnums_oldcols;
+   
+   create view totalnums_oldcols as 
+     SELECT fullname_int, agg_date AS refresh_date, agg_count AS c, site 
+	FROM totalnums;
+   
+   drop view if exists totalnums_recent;
+
+   -- Set up view for most recent totalnums
+    create view totalnums_recent as 
+    select t.* from totalnums t inner join 
+    (select fullname_int, site, max(agg_date) agg_date from totalnums group by fullname_int, site) x 
+     on x.fullname_int=t.fullname_int and x.site=t.site and x.agg_date=t.agg_date;
+     
+    -- Get denominator: any pt in COVID ontology (commented out is any lab test which works better if the site has lab tests)
+    drop view if exists anal_denom;
+
+    create view anal_denom as
+    select site, agg_count denominator from totalnums_recent where fullname_int in
+    (select fullname_int from bigfullname where c_fullname='\ACT\UMLS_C0031437\SNOMED_3947185011\');--UMLS_C0022885\')
+
+    -- View total / denominator = pct
+    drop view if exists totalnums_recent_pct;
+    
+    create view totalnums_recent_pct as
+    select fullname_int, agg_date, cast(cast(agg_count as float) / denominator * 100 as int) pct, tot.site from totalnums_recent tot inner join anal_denom d on tot.site=d.site; 
+    
+    -- Site outliers: compute avg and stdev.
+    -- I materialize this (rather than a view) because SQLite doesn't have a stdev function.
+    drop table if exists outliers_sites;
+        
+    create table outliers_sites as
+    select agg_count-stdev-average,* from totalnums_recent r inner join
+    (select * from
+    (select fullname_int,avg(agg_count) average, stdev(agg_count) stdev, count(*) num_sites from totalnums_recent r  where agg_count>-1 group by fullname_int) 
+     where num_sites>1) stat on stat.fullname_int=r.fullname_int;
+     
+    -- Site outliers: compute avg and stdev.
+    -- I materialize this (rather than a view) because SQLite doesn't have a stdev function.
+    drop table if exists outliers_sites_pct;
+        
+    create table outliers_sites_pct as
+    select pct-stdev-average,* from totalnums_recent_pct r inner join
+    (select * from
+    (select fullname_int,avg(pct) average, stdev(pct) stdev, count(*) num_sites from totalnums_recent_pct r  where pct>=0 group by fullname_int) 
+     where num_sites>1) stat on stat.fullname_int=r.fullname_int;
+   """
+   cur = conn.cursor()
+   cur.executescript(sql)
+   cur.close()
 
 def buildDb():
     # Build the main totalnums db
@@ -56,7 +141,7 @@ def buildDb():
     outdf=outdf.join(bigfullname,on='c_fullname',rsuffix='_bf',how='inner').reset_index()[['fullname_int','agg_date','agg_count','site']]
     print("Writing totalnum SQL...")
     # Temp step - use old style column names for compatibility
-    outdf=outdf.rename(columns={'agg_date':'refresh_date','agg_count':'c'})
+    #outdf=outdf.rename(columns={'agg_date':'refresh_date','agg_count':'c'})
     outdf.to_sql("totalnums",conn,if_exists='replace', index=False)
 
 
@@ -94,3 +179,5 @@ def totalnum_load(fname="",df=None):
 
 if __name__=='__main__':
     buildDb()
+    postProcess()
+    None
