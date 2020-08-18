@@ -219,7 +219,7 @@ def cbSummary(site,app_state):
 def cbSiteoutlierSliderText(slider,app_state):
     return "Threshold: " + str(slider)
 
-# New callback: update outlier options when the slider is changed
+# New callback: clear the active site selection when a tab is changed
 @app.callback(
     Output('site', 'value'),
     [Input('mainTabs','active_tab')],
@@ -397,23 +397,6 @@ def cbController(nclick_values,zoomclix,unzoomclix,site,tab,slider,checks,option
     return json.dumps(appstatedict)
 
 
-"""@app.callback(
-    Output('hoo', 'children'),
-    [Input({'type': 'navbutton', 'index': ALL}, 'n_clicks')],
-    [State('app_state', 'children')]
-)
-def cbNavButtonClick(values,state):
-    # Index is the index element of the id
-    # nclicks is an int of the number of clicks for this button
-    # values is a list of nclicks for all buttons in the current list
-    if 'index' in dash.callback_context.triggered[0]['prop_id']:
-        parsedContext = json.loads(dash.callback_context.triggered[0]['prop_id'][:-9])
-        index=parsedContext['index']
-        nclicks = dash.callback_context.triggered[0]['value']
-        appstatedict = json.loads(state)
-
-        #cbBars(checks,state)"""
-
 
 # This is the callback when someone clicks the zoom button, which moves down the hierarchy
 # It also needs to handle the base case of just setting the state of the items.
@@ -474,46 +457,6 @@ def cbNavigateButtons(state, checks, options):
 
     return options
 
-"""
-# This is the callback when someone clicks the zoom button, which moves down the hierarchy
-# It also needs to handle the base case of just setting the state of the items.
-@app.callback(
-    Output('items', 'options'),
-##    [Input('zoom', 'n_clicks'), Input('unzoom', 'n_clicks')],
-    [Input('app_state','children')],
-    [State('items', 'value'), State('items', 'options')]
-)
-def cbNavigate(state, checks, options):
-    global conn
-    if (state=='app_state'): return options
-    appstatedict = json.loads(state)
-
-    if appstatedict['action'] in ('zoom','unzoom',''):
-        #sql_select = "select distinct c_fullname AS value,c_name AS label from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int "
-        if appstatedict['tab']=='explorer_tab':
-            sql_select = "select distinct c_fullname AS value,c_name AS label from totalnums_recent_joined "
-        elif appstatedict['tab']=='siteoutlier_tab':
-            sql_select = "select distinct c_fullname AS value,c_name AS label from outliers_sites t inner join bigfullname b on t.fullname_int=b.fullname_int " # % (
-                #str(appstatedict['slider']))
-                                        # agg_count-average-(%s*stdev)<0 as outlier, 
-        else:
-            sql_select = "select distinct c_fullname AS value,c_name AS label from totalnums_recent_joined "
-
-        # Compute the items for the checkboxes and return
-        if appstatedict['site']=='All':
-            sql_where=" where c_hlevel='%s' and c_fullname like '%s'" % (
-                str(appstatedict['hlevel']), '\\'.join(appstatedict['path']) + '\\%')
-        else:
-            sql_where = " where c_hlevel='%s' and site='%s' and c_fullname like '%s'" % (
-             str(appstatedict['hlevel']), appstatedict['site'], '\\'.join(appstatedict['path']) + '\\%')
-
-        items = pd.read_sql_query(sql_select+sql_where, conn).to_dict('records')
-        print(sql_select+sql_where)
-        return items
-
-    return options
-"""
-
 # This callback draws the graph whenever checkboxes change or site is changed
 @app.callback(
     Output('hlevel_graph', 'figure'),
@@ -555,49 +498,6 @@ def cbLineGraphButtons(state, navbuttons,oldfig):
         layout =  {'legend':{'x':0,'y':ymax},'showlegend':True}
         return {'data': traces, 'layout': layout}
     return oldfig if oldfig is not None else {}
-"""
-# Deprecated - checkbox nav
-# This callback draws the graph whenever checkboxes change or site is changed
-@app.callback(
-    Output('hlevel_graph', 'figure'),
-    [Input('items', 'value'), Input('site', 'value')],
-    [State('app_state','children')]
-)
-def cbGraph(checks, isite,state):
-    global conn
-    if (state=='app_state'): return {}
-    start = time.time()
-    appstatedict = json.loads(state)
-
-
-    # Get just the available data in the df
-    sql = "select distinct c_fullname,refresh_date,c_name,c from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int where c_hlevel='%s' and site='%s' and c_fullname like '%s' order by refresh_date asc" % (
-     appstatedict['hlevel'], isite if isite else appstatedict['site'], '\\'.join(appstatedict['path']) + '\\%')
-    print(sql)
-    dfsub = pd.read_sql_query(sql, conn)
-
-    traces = []
-    ymax = 0
-    for n in checks:
-        xf = dfsub[dfsub.c_fullname == n]
-        if len(xf) > 0:
-            traces.append(
-                go.Scatter(x=xf['refresh_date'], y=xf['c'], text=xf.iloc[0, :].c_name, name=xf.iloc[0, :].c_name,
-                           marker={'size': 15}, mode='lines+markers'))
-            ymax=max(ymax,xf.groupby(by='c_fullname').max()['c'].values[0]) # Fix 11-19 - put the legend in the right place
-            Cstd=xf['c'].std()
-            Cmean=xf['c'].mean()
-            Clow = Cmean - 3*Cstd
-            if Clow<0: Clow=0
-            #traces.append(go.Scatter(x=[xf['refresh_date'].min(),xf['refresh_date'].max()],y=[Cmean,Cmean],name='mean of '+xf.iloc[0,:].c_name,mode='lines')) # Mean
-            #traces.append(go.Scatter(x=[xf['refresh_date'].min(), xf['refresh_date'].max()], y=[Cmean+3*Cstd, Cmean+3*Cstd],
-            #                        name='high control of ' + xf.iloc[0, :].c_name, mode='lines'))
-            #traces.append(go.Scatter(x=[xf['refresh_date'].min(), xf['refresh_date'].max()], y=[Clow, Clow],
-            #                         name='low control of ' + xf.iloc[0, :].c_name, mode='lines'))
-    print("Graph time:"+str(time.time()-start))
-    layout =  {'legend':{'x':0,'y':ymax}}
-    return {'data': traces, 'layout': layout}
-"""
 
 # This callback draws the bar graph whenever checkboxes change
 @app.callback(
@@ -625,64 +525,6 @@ def cbBarGraphButtonsButtons(state,navbuttons,oldfig):
                           # marker={'size': 15}, mode='lines+markers'))
     print("Bar time:"+str(time.time()-start))
     return {'data': traces}
-
-"""
-# This callback draws the bar graph whenever checkboxes change
-@app.callback(
-    Output('siteoutlier_graph', 'figure'),
-    #[Input('items_siteoutlier', 'value')],
-    [Input('items', 'value'), Input('site', 'value')],
-    [State('app_state','children')]
-)
-def cbSiteoutlierGraph(checks,site,state):
-    global conn
-    if (state=='app_state'): return {}
-    start = time.time()
-    appstatedict = json.loads(state)
-
-    # Get just the available data in the df
-    sql = "select distinct c_fullname,site,c_name,max(c) c from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int where site!='All' and c_hlevel='%s' and c_fullname like '%s' group by c_fullname,site,c_name" % (
-     appstatedict['hlevel'], '\\'.join(appstatedict['path']) + '\\%')
-    dfsub = pd.read_sql_query(sql, conn)
-
-    traces = []
-    for n in checks:
-        xf = dfsub[dfsub.c_fullname == n]
-        if len(xf) > 0:
-            traces.append(
-                go.Bar(x=xf['site'], y=xf['c'], text=xf.iloc[0, :].c_name, name=xf.iloc[0, :].c_name))
-                          # marker={'size': 15}, mode='lines+markers'))
-    print("Bar time:"+str(time.time()-start))
-    return {'data': traces}
-"""
-"""
-# This callback draws the bar graph whenever checkboxes change
-@app.callback(
-    Output('bars_graph', 'figure'),
-    [Input('items', 'value')],
-    [State('app_state','children')]
-)
-def cbBars(checks,state):
-    global conn
-    if (state=='app_state'): return {}
-    start = time.time()
-    appstatedict = json.loads(state)
-
-    # Get just the available data in the df
-    sql = "select distinct c_fullname,site,c_name,max(c) c from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int where site!='All' and c_hlevel='%s' and c_fullname like '%s' group by c_fullname,site,c_name" % (
-     appstatedict['hlevel'], '\\'.join(appstatedict['path']) + '\\%')
-    dfsub = pd.read_sql_query(sql, conn)
-
-    traces = []
-    for n in checks:
-        xf = dfsub[dfsub.c_fullname == n]
-        if len(xf) > 0:
-            traces.append(
-                go.Bar(x=xf['site'], y=xf['c'], text=xf.iloc[0, :].c_name, name=xf.iloc[0, :].c_name))
-                          # marker={'size': 15}, mode='lines+markers'))
-    print("Bar time:"+str(time.time()-start))
-    return {'data': traces}
-"""
 
 # This callback draws the bar graph whenever checkboxes change
 @app.callback(
@@ -746,116 +588,16 @@ def cbSiteoutlierGraph(state,navbuttons,oldfig):
     layout = go.Layout(barmode='stack', title=graph_title)
     return {'data': traces,'layout':layout}
 
-"""
-# This callback draws the tree whenever button is clicked or site is changed
-@app.callback(
-    Output('tree_graph', 'figure'),
-   # [Input('zoom', 'n_clicks'), Input('unzoom', 'n_clicks'), Input('site', 'value')],
-    [Input('app_state','children')]
-)
-def cbTree(state):
-    global conn
-    if (state=='app_state'): return {}
-    appstatedict = json.loads(state)
-    if 'zoom' not in appstatedict['action']: return {}
-    if 'zoomTree' not in appstatedict['action']: return {} # effectively disable the tree for now, it's sooo slow
-
-    G = nx.Graph()
-
-    for h in range(2):  # maxhlevel-minhlevel):
-        hlevel = appstatedict['hlevel'] + h
-        sql = "select distinct c_fullname AS value,c_name AS label,max(c) c from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int where c_hlevel='%s' and site='%s' and c_fullname like '%s' group by c_fullname,c_name" % (
-            hlevel, appstatedict['site'], '\\'.join(appstatedict['path']) + '\\%')
-        items = pd.read_sql_query(sql, conn).to_dict('records')
-
-        for i in items:
-            k = i['value']
-            c_path = k[:len(k) - 1 - k[:-1][::-1].find("\\")]
-            if c_path not in G.nodes.keys():
-                G.add_node(c_path,label=c_path,c=0)
-            G.add_node(k, label=i['label'], c=i['c'])
-            G.add_edge(c_path, k)#, weight=i['c'])
-
-    # Code adapted from https://plot.ly/~empet/14683/networks-with-plotly/#/
-
-    pos = nx.kamada_kawai_layout(G)
-    # get coordinates
-    Xn = []
-    Xe = []
-    Nlabel = []
-    # for k in pos.keys():
-    #    Xn.append(pos[k][0])
-    #    Yn.append(pos[k][1])
-
-    Xn = [pos[k][0] for k in pos.keys()]
-    Yn = [pos[k][1] for k in pos.keys()]
-    Nkeys = [k for k in pos.keys()]
-    Nlabel = [G.nodes.data()[k]['label']+'('+str(G.nodes.data()[k]['c'])+')' for k in pos.keys()]
-    Nsize = [G.nodes[k]['c'] for k in pos.keys()]
-    NsizeMaz = max(Nsize)
-    Xe = []
-    Ye = []
-    for e in G.edges():
-        Xe.extend([pos[e[0]][0], pos[e[1]][0], None])
-        Ye.extend([pos[e[0]][1], pos[e[1]][1], None])
-
-    # Make it all happen with plotly
-    trace_nodes = dict(type='scatter',
-                       x=Xn,
-                       y=Yn,
-                       mode='markers',
-                       marker=dict(size=[(k/NsizeMaz)*25 for k in Nsize], color='rgb(0,240,0)'),
-                       text=Nlabel,
-                       hoverinfo='text')
-    trace_edges = dict(type='scatter',
-                       mode='lines',
-                       x=Xe,
-                       y=Ye,
-                       line=dict(width=1, color='rgb(25,25,25)'),
-                       hoverinfo='none'
-                       )
-
-    axis = dict(showline=False,  # hide axis line, grid, ticklabels and  title
-                zeroline=False,
-                showgrid=False,
-                showticklabels=False,
-                title=''
-                )
-    layout = dict(title='Graph of nodes and children',
-                  font=dict(family='Balto'),
-                  width=1000,
-                  height=700,
-                  autosize=True,
-                  showlegend=False,
-                  xaxis=axis,
-                  yaxis=axis,
-                  margin=dict(
-                      l=40,
-                      r=40,
-                      b=85,
-                      t=100,
-                      pad=0,
-
-                  ),
-                  hovermode='closest',
-                  plot_bgcolor='#efecea',  # set background color
-                  )
-
-    fig = dict(data=[trace_edges, trace_nodes], layout=layout)
-    return fig
-"""
-
 if __name__=='__main__':
 
     # MSSQL
-"""    password_mssql = keyring.get_password(service_name='db.totalnums_mssql',username='i2b2')  # You need to previously have set it with set_password
-    db = {'server':'localMSSQL','user':'i2b2','password':password_mssql,'db':'dbo'}
-    db="DSN=localMSSQL;UID=i2b2;PWD="+password_mssql
-    initApp(dbtype='MSSQL',db=db)
-"""
+    """    password_mssql = keyring.get_password(service_name='db.totalnums_mssql',username='i2b2')  # You need to previously have set it with set_password
+        db = {'server':'localMSSQL','user':'i2b2','password':password_mssql,'db':'dbo'}
+        db="DSN=localMSSQL;UID=i2b2;PWD="+password_mssql
+        initApp(dbtype='MSSQL',db=db)
+    """
 
     # SQLite
-    global globalDbFile
     globalDbFile = "/Users/jeffklann/HMS/Projects/ACT/totalnum_data/reports/totalnums.db"
     initApp(
         db="/Users/jeffklann/HMS/Projects/ACT/totalnum_data/reports/totalnums.db")
