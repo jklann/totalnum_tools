@@ -23,6 +23,11 @@ select distinct concept_path, name_char from concept_dimension
 select distinct c_fullname, c_name, c_visualattributes, c_tooltip from act_covid 
  and c_visualattributes not like '%H%' and c_synonym_cd!='Y'
   (only the first two columns are needed)
+  
+To do this for the whole ACT ontology, use my act_master_vw (separate script) and:
+select distinct c_fullname, c_name, c_hlevel, c_visualattributes, c_tooltip from act_master_vw 
+ where c_visualattributes not like '%H%' and c_synonym_cd!='Y'
+
 """
 
 # Thanks https://stackoverflow.com/questions/2298339/standard-deviation-for-sqlite
@@ -46,7 +51,7 @@ class StdevFunc:
         return math.sqrt(self.S / (self.k-2))
 
 basedir = "/Users/jeffklann/HMS/Projects/ACT/totalnum_data/reports"
-bigfullnamefile = '/Users/jeffklann/HMS/Projects/ACT/totalnum_data/ACT_covid_paths_v3.csv'
+bigfullnamefile = '/Users/jeffklann/HMS/Projects/ACT/totalnum_data/ACT_paths_full.csv' # ACT_covid_paths_v3.csv
 conn = sqlite3.connect(basedir + '/totalnums.db')
 conn.create_aggregate("stdev", 1, StdevFunc)
 
@@ -123,11 +128,16 @@ def buildDb():
         tot = totalnum_load(basedir + '/' + f)
         totals.append(tot)
 
+    # 11-20 - support both utf-8 and cp1252
     print(bigfullnamefile)
-    bigfullname = pd.read_csv(bigfullnamefile,index_col='c_fullname')
+    bigfullname = None
+    try:
+        bigfullname = pd.read_csv(bigfullnamefile,index_col='c_fullname',delimiter=',',dtype='str')
+    except UnicodeDecodeError:
+        bigfullname = pd.read_csv(bigfullnamefile,index_col='c_fullname',delimiter=',',dtype='str',encoding='cp1252')
 
     # Add c_hlevel, domain, and fullname_int columns
-    bigfullname.insert(1, "c_hlevel", [x.count("\\") for x in bigfullname.index])
+    if "c_hlevel" not in bigfullname.columns: bigfullname.insert(1, "c_hlevel", [x.count("\\") for x in bigfullname.index])
     bigfullname.insert(1, "domain", [x.split('\\')[2] if "PCORI_MOD" not in x else "MODIFIER" for x in bigfullname.index])
     bigfullname['fullname_int']=range(0,len(bigfullname))
     bigfullname.to_sql('bigfullname',conn,if_exists='replace')
@@ -157,7 +167,11 @@ def buildDb():
 
 def totalnum_load(fname="",df=None):
     if not df:
-        df = pd.read_csv(fname,index_col=0)
+        # Support both utf-8 and cp1252
+        try:
+            df = pd.read_csv(fname,index_col=0)
+        except UnicodeDecodeError:
+            df = pd.read_csv(fname, index_col=0,encoding='cp1252')
     # Remove null rows
     #df = df.loc[(df.ix[:,3:]!=0).any(axis=1)]
     # Lowercase totalnum columns
@@ -178,6 +192,7 @@ def totalnum_load(fname="",df=None):
     return df
 
 if __name__=='__main__':
+    print("SQLite Version is:", sqlite3.sqlite_version)
     buildDb()
     postProcess()
     None
