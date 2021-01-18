@@ -7,6 +7,19 @@ import pandas as pd
 import math
 
 """
+ISSUES 12-15
+NCATS_DEMOGRAPHICS and visit details - not even there
+X Diagnoses ok
+ACT Labs doesn't show up after "full list"
+ACT Laboratory Tests no show at all
+ACT Meds can't drill into
+X Procedures ok
+X COVID-19 broken
+Visit details not there
+
+"""
+
+"""
   New version loads totalnum reports into a SQLite3 db from basedir (below) with the name format report_[siteid]_[foo].csv.
   Columns must be (in order) c_fullname, agg_date, agg_count. (Case insensitive on column names however.)
   Date format for agg_date (as enforced by the totalnum report script), should be YYYY-MM-DD, but the python parser can handle others.
@@ -63,8 +76,8 @@ def postProcess():
     drop view if exists totalnums_recent_joined;
 
     create view totalnums_recent_joined as
-    select c_hlevel,c_visualattributes,c_fullname,c_name,agg_date,agg_count,site from totalnums_recent t
-    inner join bigfullname f on f.fullname_int=t.fullname_int;
+    select c_hlevel,domain,c_visualattributes,f.fullname_int,c_fullname,c_name,agg_date,agg_count,site from 
+    bigfullname f left join totalnums_recent t on f.fullname_int=t.fullname_int;
 
    -- Create a view with old column names
    drop view if exists totalnums_oldcols;
@@ -113,6 +126,27 @@ def postProcess():
     (select * from
     (select fullname_int,avg(pct) average, stdev(pct) stdev, count(*) num_sites from totalnums_recent_pct r  where pct>=0 group by fullname_int) 
      where num_sites>1) stat on stat.fullname_int=r.fullname_int;
+
+    -- Add some fullnames for summary measures and reporting
+    drop table if exists  toplevel_fullnames;
+
+    create table toplevel_fullnames as
+    select fullname_int from bigfullname where c_fullname like '\ACT\Diagnosis\ICD10\%' and c_hlevel=2 and c_visualattributes not like 'L%'
+    union all
+    select fullname_int from bigfullname where c_fullname like '\ACT\Diagnosis\ICD9\V2_2018AA\A18090800\%' and c_hlevel=2 and c_visualattributes not like 'L%'
+    union all
+    select fullname_int from bigfullname where c_fullname like '\ACT\Procedures\CPT4\V2_2018AA\A23576389\%' and c_hlevel=2 and c_visualattributes not like 'L%'
+    union all
+    select fullname_int from bigfullname where c_fullname like '\ACT\Procedures\HCPCS\V2_2018AA\A13475665\%' and c_hlevel=2 and c_visualattributes not like 'L%'
+    union all
+    select fullname_int from bigfullname where c_fullname like '\ACT\Procedures\ICD10\V2_2018AA\A16077350\%' and c_hlevel=2 and c_visualattributes not like 'L%'
+    union all
+    select fullname_int from bigfullname where c_fullname like '\ACT\Lab\LOINC\V2_2018AA\%' and c_hlevel=7 and c_visualattributes not like 'L%'
+    union all
+    select fullname_int from bigfullname where c_fullname like '\ACT\Medications\MedicationsByVaClass\V2_09302018\%' and c_hlevel=5 and c_visualattributes not like 'L%';
+    
+    create index toplevel_fullnames_f on toplevel_fullnames(fullname_int);
+
    """
    cur = conn.cursor()
    cur.executescript(sql)

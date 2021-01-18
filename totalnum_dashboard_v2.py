@@ -12,6 +12,7 @@ import pandas as pd
 import plotly.graph_objs as go
 from dash.dependencies import Input, Output, State, MATCH, ALL
 import dash_bootstrap_components as dbc
+import plotly.express as px
 
 """
 Requires Dash. Recommended install:
@@ -63,7 +64,8 @@ app.layout = html.Div([
         id="modalHelp",
         size='xl'
     ),
-    dbc.Row(dbc.Col(dbc.RadioItems(id='site', options=[],inline=True),width=4),justify='center'),
+    dbc.Row([dbc.Col("Site selection:",width=1),dbc.Col(dbc.RadioItems(id='site', options=[],inline=True),width=4)],justify='center'),
+    #dbc.Row([dbc.Col("Mode:",width=1),dbc.Col(dbc.RadioItems(id='mode', options=[{'label':'Explore','value':'X'},{'label':'Site Variability','value':'V'},{'label':'Trends over Time','value':'T'},{'label':'Missingness','value':'M'}],inline=True),width=6)],justify='left'),
 
     dbc.Row([
         dbc.Col(children=[dbc.Tabs([
@@ -81,12 +83,12 @@ app.layout = html.Div([
 
         dbc.Col(children=[dbc.Tabs([
             # Summary tab
-            dbc.Tab(dbc.Card([dbc.CardHeader('',id='summary_head'),dbc.CardBody(dcc.Markdown('',id='summary'))],color='secondary',style={'width': '500px'}),label='Summary',tab_id='summary_tab',label_style={"color": "blue"}),
+            dbc.Tab(dbc.Card([dbc.CardHeader('',id='summary_head'),dbc.CardBody(dcc.Markdown('',id='summary'))],color='secondary',style={'width': '800px'}),label='Summary',tab_id='summary_tab',label_style={"color": "blue"}),
             # Explorer tab
             dbc.Tab(dbc.Table([html.Tr([
                 html.Td(dbc.Tabs([
                     dbc.Tab(dcc.Graph(id='hlevel_graph'),label='Trends Over Time',tab_id='hlevel_tab',disabled=True),
-                    dbc.Tab(dcc.Graph(id='bars_graph'),label='Trends Across Sites',tab_id='bars_tab',disabled=True)
+                    dbc.Tab(dcc.Graph(id='bars_graph',figure=go.Figure(data=go.Bar(y=[2, 3, 1]))),label='Trends Across Sites',tab_id='bars_tab',disabled=True)
                 ],id='graphTabs'))] )
             ]),label="Explorer",tab_id='explorer_tab',label_style={"color": "blue"}),
             # Site variability tab
@@ -194,7 +196,7 @@ def cbSummaryHead(site,app_state):
 
 
 # New callback to print a summary when a site is selected
-@app.callback(
+"""@app.callback(
     Output('summary', 'children'),
     [Input('site','value')],
     [State('app_state','children')]
@@ -202,13 +204,16 @@ def cbSummaryHead(site,app_state):
 def cbSummary(site,app_state):
     global conn
     if site is not None and site!='All':
-        # TODO: This query is specific to COVID ontology and should reflect some principled way of determining elements for a summary table
-        query = "select c_name, agg_count from totalnums_recent_joined where c_hlevel<6 and site='" + site + "'"
-        dfsum = pd.read_sql_query(query, conn)
-        return dfsum.to_markdown()
+        appstatedict = json.loads(app_state)
+        if appstatedict['tab']=='summary_tab' and appstatedict['action']!='':
+            # TODO: This query is specific to COVID ontology and should reflect some principled way of determining elements for a summary table
+            query = "select domain, c_name, agg_count from totalnums_recent_joined j inner join toplevel_fullnames f on f.fullname_int=j.fullname_int where c_hlevel<6 and site='" + site + "'"
+            dfsum = pd.read_sql_query(query, conn)
+            return dfsum.to_markdown()
     elif site=="All":
         return "Select a single site for a summary."
     return ""
+"""
 
 # New callback: update outlier options when the slider is changed
 @app.callback(
@@ -258,28 +263,31 @@ def cbSiteoutlierItems(slider,site,app_state):
 )
 def cbMissingMd(site,app_state):
     global conn
-    c = conn.cursor()
-    # TODO: This is all non-leaf missingness. Probably want to look at leaf variance between sites vs. annotated high level missing
-    query = """select c_fullname, c_tooltip, c_hlevel, c_name from bigfullname fn inner join totalnums_recent r on r.fullname_int=fn.fullname_int 
-      where fn.fullname_int not in (select fullname_int from totalnums_recent where site='{{}}') and c_visualattributes not like 'L%' and c_visualattributes not like '_H%'
-      order by c_hlevel """
-    query=query.replace("{{}}",site)
-    df = pd.read_sql_query(query,conn)
-    df=df.sort_values(by='c_fullname',axis=0,ascending=True)
-    # I had this on one line but was too hard to debug
-    # Compute a readable string for missingness
-    retval = []
-    current = []
-    for x in df.to_dict('records'):
-        parensplit = x['c_tooltip'].split('\\') # Compute this here bc hlevel is unreliable
-        if len(parensplit)>2:
-            for c,s in enumerate(parensplit[2:],start=1):
-                if s not in current:
-                    txtcolor='red' if c==len(parensplit[2:]) else 'black'
-                    retval.append(html.P(s,style={'margin-top':0,'margin-bottom':0,'padding':0,'margin-left':10*c,'color':('red' if c==len(parensplit[2:]) else 'black')}))
-                    #retval.append(("#"*c)+' ' + str(c) + '.' + ('*'+s+'*' if c==len(parensplit[2:]) else s))
-            current=parensplit
-    return retval
+    if (app_state == 'app_state'): return {}
+    appstatedict = json.loads(app_state)
+    if appstatedict['tab'] == 'missing_tab':
+        c = conn.cursor()
+        # TODO: This is all non-leaf missingness. Probably want to look at leaf variance between sites vs. annotated high level missing
+        query = """select c_fullname, c_tooltip, c_hlevel, c_name from bigfullname fn inner join totalnums_recent r on r.fullname_int=fn.fullname_int 
+          where fn.fullname_int not in (select fullname_int from totalnums_recent where site='{{}}') and c_visualattributes not like 'L%' and c_visualattributes not like '_H%'
+          order by c_hlevel """
+        query=query.replace("{{}}",site)
+        df = pd.read_sql_query(query,conn)
+        df=df.sort_values(by='c_fullname',axis=0,ascending=True)
+        # I had this on one line but was too hard to debug
+        # Compute a readable string for missingness
+        retval = []
+        current = []
+        for x in df.to_dict('records'):
+            parensplit = x['c_tooltip'].split('\\') # Compute this here bc hlevel is unreliable
+            if len(parensplit)>2:
+                for c,s in enumerate(parensplit[2:],start=1):
+                    if s not in current:
+                        txtcolor='red' if c==len(parensplit[2:]) else 'black'
+                        retval.append(html.P(s,style={'margin-top':0,'margin-bottom':0,'padding':0,'margin-left':10*c,'color':('red' if c==len(parensplit[2:]) else 'black')}))
+                        #retval.append(("#"*c)+' ' + str(c) + '.' + ('*'+s+'*' if c==len(parensplit[2:]) else s))
+                current=parensplit
+        return retval
     #return [dbc.ListGroupItem(x['c_tooltip'].split('\\')[2] + ":" + x['c_name']) if x['c_hlevel']>2 else  + ":" + x['c_name']) for x in df.to_dict('records')]
 
 
@@ -330,8 +338,9 @@ def cbController(nclick_values,zoomclix,unzoomclix,site,tab,slider,checks,option
         c.execute("select min(c_hlevel) from bigfullname")
         hlevel = c.fetchone()[0]
         minhlevel = hlevel
-        query = "select top 1 c_fullname from bigfullname where c_hlevel=?" if dbstyle=="MSSQL" else "select c_fullname from bigfullname where c_hlevel=? limit 1"
-        c.execute(query, str(hlevel)) # Limit 1 for PGSQL
+        #query = "select top 1 c_fullname from bigfullname where c_hlevel=?" if dbstyle=="MSSQL" else "select c_fullname from bigfullname where c_hlevel=? limit 1"
+        #c.execute(query, str(hlevel)) # Limit 1 for PGSQL
+        c.execute("select c_fullname from bigfullname where c_hlevel="+str(hlevel)+" limit 1") # NOT SUPPORTING MSSQL RIGHT NOW TODO
         pathstart = c.fetchone()[0]
         pathstart = pathstart[0:pathstart[1:].find('\\') + 1]
         path = [pathstart]
@@ -359,8 +368,8 @@ def cbController(nclick_values,zoomclix,unzoomclix,site,tab,slider,checks,option
         appstatedict['action']='site'
     elif unclix != appstatedict['unzoom_clix']:
         appstatedict['unzoom_clix'] = unclix
-        if appstatedict['hlevel'] > appstatedict['minhlevel']:
-            appstatedict['hlevel'] = appstatedict['hlevel'] - 1
+        if int(appstatedict['hlevel']) > int(appstatedict['minhlevel']):
+            appstatedict['hlevel'] = int(appstatedict['hlevel']) - 1
             appstatedict['path'] = appstatedict['path'][:-1]
             appstatedict['action']='unzoom'
             appstatedict['selected_new']=''
@@ -371,9 +380,14 @@ def cbController(nclick_values,zoomclix,unzoomclix,site,tab,slider,checks,option
     #    print("Controller - no action")
     elif appstatedict['zoom_clix'] != clix:
         appstatedict['zoom_clix'] = clix
-        appstatedict['hlevel'] = appstatedict['hlevel'] + 1
+        appstatedict['hlevel'] = int(appstatedict['hlevel']) + 1
         # Use checkbox - appstatedict['path'].append(checks[0][checks[0][:-1].rfind('\\') + 1:-1])
-        appstatedict['path'].append(appstatedict['selected_new'][appstatedict['selected_new'][:-1].rfind('\\') + 1:-1])
+        #appstatedict['path'].append(appstatedict['selected_new'][appstatedict['selected_new'][:-1].rfind('\\') + 1:-1])
+        # new version just rebuilds the path string each time in case there segments like in ACT that just provide version info and are not part of the hierarchy
+        #appstatedict['path']=appstatedict['selected_new'].split('\\')[:-1]
+        # even newer version only adds one path element for reverse navigation but preserves untraversed segments in the path
+        appstatedict['path'].append(
+            appstatedict['selected_new'][appstatedict['selected_new'].find('\\'.join(appstatedict['path']))+len('\\'.join(appstatedict['path']))+1:-1])
         appstatedict['action']='zoom'
         appstatedict['selected_new'] = ''
         appstatedict['selected'] = []
@@ -416,7 +430,7 @@ def cbNavigateButtons(state, checks, options):
     if appstatedict['action'] in ('zoom','unzoom','') or appstatedict['tab']=='siteoutlier_tab':
         #sql_select = "select distinct c_fullname AS value,c_name AS label from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int "
         if appstatedict['tab']=='explorer_tab':
-            sql_select = "select distinct c_visualattributes, c_fullname AS value,c_name AS label from totalnums_recent_joined "
+            sql_select = "select distinct c_visualattributes, c_fullname AS value,c_name AS label from bigfullname " # speedup compared to totalnums_recent_joined
         elif appstatedict['tab']=='siteoutlier_tab':
             sql_select = "select distinct  abs(pct-average)>(%s*stdev) as outlier,c_fullname AS value,c_name AS label, c_visualattributes from outliers_sites_pct t inner join bigfullname b on t.fullname_int=b.fullname_int " % (
                 str(appstatedict['slider']))
@@ -431,11 +445,11 @@ def cbNavigateButtons(state, checks, options):
               order by c_hlevel) x """
             sql_select = sql_select.replace("{{}}", appstatedict['site'])
         else:
-            sql_select = "select distinct c_fullname AS value,c_name AS label, c_visualattributes from totalnums_recent_joined "
+            sql_select = "select distinct c_fullname AS value,c_name AS label, c_visualattributes from bigfullname " # speedup compared to totalnums_recent_joined
 
         # Compute the items for the checkboxes and return
         # Special logic to get all items in ontology if missing tab or all sites are selected
-        if appstatedict['site']=='All' or appstatedict['tab']=='missing_tab':
+        if appstatedict['site']=='All' or appstatedict['tab']=='missing_tab' or appstatedict['tab']=='explorer_tab':
             sql_where=" where c_hlevel='%s' and c_fullname like '%s'" % (
                 str(appstatedict['hlevel']), '\\'.join(appstatedict['path']) + '\\%')
         else:
@@ -468,8 +482,7 @@ def cbLineGraphButtons(state, navbuttons,oldfig):
     if (state=='app_state'): return {}
     start = time.time()
     appstatedict = json.loads(state)
-
-    if appstatedict['action'] in ('navclick','zoom','site'):
+    if appstatedict['action'] in ('navclick','zoom','site') and appstatedict['tab']=='explorer_tab':
         # Get just the available data in the df
         sql = "select distinct c_fullname,refresh_date,c_name,c from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int where c_hlevel='%s' and site='%s' and c_fullname like '%s' order by refresh_date asc" % (
          appstatedict['hlevel'], appstatedict['site'], '\\'.join(appstatedict['path']) + '\\%')
@@ -494,7 +507,7 @@ def cbLineGraphButtons(state, navbuttons,oldfig):
                 #                        name='high control of ' + xf.iloc[0, :].c_name, mode='lines'))
                 #traces.append(go.Scatter(x=[xf['refresh_date'].min(), xf['refresh_date'].max()], y=[Clow, Clow],
                 #                         name='low control of ' + xf.iloc[0, :].c_name, mode='lines'))
-        print("Graph time:"+str(time.time()-start))
+        print("Graph time:"+str(time.time()-start)+",traces:"+str(len(traces)))
         layout =  {'legend':{'x':0,'y':ymax},'showlegend':True}
         return {'data': traces, 'layout': layout}
     return oldfig if oldfig is not None else {}
@@ -503,28 +516,65 @@ def cbLineGraphButtons(state, navbuttons,oldfig):
 @app.callback(
     Output('bars_graph', 'figure'),
     [Input('app_state', 'children')],
-    [State('navbuttons', 'children'), State('hlevel_graph', 'figure')]
+    [State('navbuttons', 'children')]
 )
-def cbBarGraphButtonsButtons(state,navbuttons,oldfig):
+def cbBarGraphButtons(state,navbuttons):
     global conn
     if (state=='app_state'): return {}
     start = time.time()
     appstatedict = json.loads(state)
+    if appstatedict['tab'] == 'explorer_tab':
 
-    # Get just the available data in the df
+        sql = "select distinct c_fullname,site,c_name,max(c) c from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int where site!='All' and c_hlevel='%s' and c_fullname like '%s' group by c_fullname,site,c_name" % (
+            appstatedict['hlevel'], '\\'.join(appstatedict['path']) + '\\%')
+        print(sql)
+        dfsub = pd.read_sql_query(sql, conn)
+
+        """traces = []
+        ymax = 0
+        for n in appstatedict['selected']:
+            xf = dfsub[dfsub.c_fullname == n]
+            if len(xf) > 0:
+                fig = px.bar"""
+
+        figure = go.Figure(data=go.Bar(y=[5, 5, 1]))
+        traces=[]
+        x = [
+            ["BB+", "BB+", "BB+", "BB", "BB", "BB"],
+            [16, 17, 18, 16, 17, 18, ]
+        ]
+        fig = go.Figure()
+        fig.add_bar(x=x, y=[1, 2, 3, 4, 5, 6])
+        fig.add_bar(x=x, y=[6, 5, 4, 3, 2, 1])
+        fig.update_layout(barmode="relative")
+
+        return figure
+    return
+    """"# Get just the available data in the df
     sql = "select distinct c_fullname,site,c_name,max(c) c from totalnums_oldcols t inner join bigfullname b on t.fullname_int=b.fullname_int where site!='All' and c_hlevel='%s' and c_fullname like '%s' group by c_fullname,site,c_name" % (
      appstatedict['hlevel'], '\\'.join(appstatedict['path']) + '\\%')
+    print(sql)
     dfsub = pd.read_sql_query(sql, conn)
 
     traces = []
+    ymax=0
     for n in appstatedict['selected']:
         xf = dfsub[dfsub.c_fullname == n]
         if len(xf) > 0:
+            ymax = max(ymax, xf.groupby(by='c_fullname').max()['c'].values[0])
             traces.append(
-                go.Bar(x=xf['site'], y=xf['c'], text=xf.iloc[0, :].c_name, name=xf.iloc[0, :].c_name))
+                #go.Bar(x=xf['site'].tolist(), y=xf['c'].tolist(), text=xf.iloc[0, :].c_name, name=xf.iloc[0, :].c_name))
+                go.Bar(x=xf['site'].tolist(), y=xf['c'].tolist()))
                           # marker={'size': 15}, mode='lines+markers'))
     print("Bar time:"+str(time.time()-start))
-    return {'data': traces}
+
+    #layout =  {'legend':{'x':0,'y':ymax},'showlegend':True}
+    layout = go.Layout(barmode='stack')
+    if len(traces)>0:
+        print(traces)
+    return {'data': traces, 'layout': layout}
+
+    #return {'data': traces}"""
 
 # This callback draws the bar graph whenever checkboxes change
 @app.callback(
@@ -538,17 +588,19 @@ def cbSiteoutlierGraph(state,navbuttons,oldfig):
     if (state=='app_state'): return {}
     start = time.time()
     appstatedict = json.loads(state)
-    if appstatedict['site'] and appstatedict['site']=='All': return {} # Not support All sites, must choose one for compare
+    if (appstatedict['site'] and appstatedict['site']=='All') or appstatedict['tab']!='siteoutlier_tab': return {} # Not support All sites, must choose one for compare
 
     # Get just the available data in the df
     sql = "select distinct c_fullname,site,c_name,max(pct) c from totalnums_recent_pct t inner join bigfullname b on t.fullname_int=b.fullname_int where site!='All' and c_hlevel='%s' and c_fullname like '%s' group by c_fullname,site,c_name" % (
      appstatedict['hlevel'], '\\'.join(appstatedict['path']) + '\\%')
     dfsub = pd.read_sql_query(sql, conn)
+    print(sql)
 
     # Also get average
     sql = "select distinct c_fullname,c_name,average avg, (%s*stdev) stdev from outliers_sites_pct t inner join bigfullname b on t.fullname_int=b.fullname_int where site!='All' and c_hlevel='%s' and c_fullname like '%s' group by c_fullname,site,c_name" % (
      str(appstatedict['slider']),appstatedict['hlevel'], '\\'.join(appstatedict['path']) + '\\%')
     dfavg = pd.read_sql_query(sql, conn)
+    print(sql)
 
     traces = []
     n=appstatedict['selected_new']
@@ -602,4 +654,4 @@ if __name__=='__main__':
     initApp(
         db="/Users/jeffklann/HMS/Projects/ACT/totalnum_data/reports/totalnums.db")
 
-    app.run_server(debug=True,threaded=False)
+    app.run_server(debug=False,threaded=False)
